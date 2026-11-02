@@ -1,4 +1,3 @@
 {
-  "functions": { "api/world.py": { "memory": 512, "maxDuration": 10 } },
   "rewrites": [{ "source": "/", "destination": "/index.html" }]
 }
