@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>몰랑이네 동네</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="몰랑이네">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f3ee">
+<meta name="theme-color" content="#1b1917" media="(prefers-color-scheme: dark)">
 <style>
   :root{
     color-scheme: light;
@@ -44,18 +52,23 @@
     overflow-x:auto;
   }
   .grid{display:grid;gap:1px;min-width:320px}
+  .wrap{position:relative}
+  .wrap canvas{position:absolute;inset:0;width:100%;height:100%;
+               pointer-events:none;border-radius:10px}
+  .grid{position:relative;z-index:1}
   .cell{
-    aspect-ratio:1;border-radius:4px;background:var(--grass);
+    aspect-ratio:1;border-radius:4px;
     display:flex;align-items:center;justify-content:center;
     font-size:min(3.4vw,15px);position:relative;
-    transition:background .25s;
   }
-  .cell.empty{background:transparent}
-  .cell.land{background:var(--water)}
-  .cell.village{background:var(--dirt)}
-  .cell.spot{cursor:pointer}
+  .cell.spot{
+    cursor:pointer;
+    background:var(--card);
+    box-shadow:0 1px 2px rgba(0,0,0,.06);
+  }
   .cell.spot:active{transform:scale(.92)}
-  .cell.here{box-shadow:0 0 0 2px var(--glow) inset;background:var(--glow)}
+  .cell.here{box-shadow:0 0 0 2px var(--glow),0 1px 3px rgba(0,0,0,.1);
+             background:var(--glow)}
   .who{
     position:absolute;bottom:-2px;right:-1px;
     font-size:min(2.6vw,11px);line-height:1;
@@ -102,7 +115,10 @@
   <div class="sub" id="sub">불러오는 중…</div>
 </header>
 
-<div class="map"><div class="grid" id="grid"></div></div>
+<div class="map"><div class="wrap">
+  <canvas id="terrain"></canvas>
+  <div class="grid" id="grid"></div>
+</div></div>
 
 <div class="legend" id="legend"></div>
 
@@ -157,6 +173,83 @@ function whoAt(frame){
   return out;
 }
 
+// 자리마다 땅의 결이 있다. 둘레로 번져서 지형이 된다.
+const SOIL = {
+  "바다":[86,140,168], "물가":[96,146,166], "숲":[96,134,86],
+  "들판":[164,172,104], "산":[140,132,118], "언덕마루":[158,156,110],
+  "꽃길":[186,132,152], "밤하늘터":[104,104,148], "메아리벽":[132,128,120],
+  "폐허":[140,130,118], "안개골":[150,150,150], "꽃밭":[190,140,160],
+};
+const VILLAGE_SOIL = [182,160,128];     // 마을은 흙빛
+
+function soilOf(name, zone){
+  return SOIL[name] || (zone === "village" ? VILLAGE_SOIL : [150,160,130]);
+}
+
+function paintTerrain(){
+  // **자리에서 번진다.** 가까울수록 그 땅의 빛을 띤다.
+  // 없는 강이나 해안선을 그리지 않는다 — 자료에 있는 것만 쓴다.
+  const cv = document.getElementById("terrain");
+  const g = document.getElementById("grid");
+  const [W,H] = world.size;
+  const rect = g.getBoundingClientRect();
+  if(!rect.width) return;
+  const px = Math.max(1, Math.round(rect.width / W));
+  cv.width = W * px; cv.height = H * px;
+  const ctx = cv.getContext("2d");
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+
+  const seeds = Object.entries(world.spots).map(([n,s]) =>
+    ({x:s.xy[0], y:s.xy[1], c:soilOf(n, s.zone)}));
+  if(!seeds.length) return;
+
+  const img = ctx.createImageData(cv.width, cv.height);
+  for(let py=0; py<cv.height; py++){
+    for(let pxx=0; pxx<cv.width; pxx++){
+      const gx = pxx/px - 0.5, gy = py/px - 0.5;
+      let r=0,gg=0,b=0,wsum=0;
+      for(const s of seeds){
+        const d2 = (s.x-gx)**2 + (s.y-gy)**2;
+        const w = 1/(d2*d2 + 0.35);        // 가까운 자리가 세게 물든다
+        r+=s.c[0]*w; gg+=s.c[1]*w; b+=s.c[2]*w; wsum+=w;
+      }
+      r/=wsum; gg/=wsum; b/=wsum;
+      // 바탕과 섞어 연하게 — 지형은 배경이지 주인공이 아니다
+      const mix = dark ? 0.30 : 0.26;
+      const base = dark ? 28 : 246;
+      const i = (py*cv.width + pxx)*4;
+      img.data[i]   = base*(1-mix) + r*mix;
+      img.data[i+1] = base*(1-mix) + gg*mix;
+      img.data[i+2] = base*(1-mix) + b*mix;
+      img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  paintPaths(ctx, px);
+}
+
+function paintPaths(ctx, px){
+  // **길.** 자주 오간 사이는 땅에 자국이 남는다.
+  const paths = world.paths || [];
+  if(!paths.length) return;
+  const s = world.spots;
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const most = Math.max(...paths.map(p => p.n), 1);
+  ctx.lineCap = "round";
+  for(const p of paths){
+    const a = s[p.a], b = s[p.b];
+    if(!a || !b) continue;
+    const t = p.n / most;
+    ctx.strokeStyle = dark ? `rgba(220,205,180,${0.07 + t*0.16})`
+                           : `rgba(150,125,90,${0.08 + t*0.20})`;
+    ctx.lineWidth = px * (0.10 + t*0.26);
+    ctx.beginPath();
+    ctx.moveTo((a.xy[0]+0.5)*px, (a.xy[1]+0.5)*px);
+    ctx.lineTo((b.xy[0]+0.5)*px, (b.xy[1]+0.5)*px);
+    ctx.stroke();
+  }
+}
+
 function draw(frame){
   if(!world) return;
   const [W,H] = world.size;
@@ -186,7 +279,10 @@ function draw(frame){
     g.appendChild(c);
   }
   legend();
+  requestAnimationFrame(paintTerrain);
 }
+
+addEventListener("resize", () => world && paintTerrain());
 
 function legend(){
   const el = document.getElementById("legend");
