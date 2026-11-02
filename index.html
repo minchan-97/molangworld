@@ -129,6 +129,7 @@ async function load(){
   try{
     const r = await fetch(API);
     const d = await r.json();
+    if(d.error) throw new Error(d.error);
     world = d.view; frames = (d.replay && d.replay.frames) || [];
     const seek = document.getElementById("seek");
     seek.max = Math.max(0, frames.length - 1);
@@ -138,7 +139,9 @@ async function load(){
     document.getElementById("sub").textContent =
       `${Object.keys(world.spots).length}곳 · 되감을 수 있는 장면 ${frames.length}개`;
   }catch(e){
-    document.getElementById("sub").textContent = "불러오지 못했어요";
+    // 왜 안 됐는지 화면에 적는다 — 조용히 실패하면 고칠 수가 없다
+    document.getElementById("sub").textContent =
+      "불러오지 못했어요 — " + (e && e.message ? e.message : e);
   }
 }
 
