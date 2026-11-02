@@ -97,6 +97,32 @@ def world():
     except Exception:
         pass
 
+    # **길.** 자주 오간 사이는 땅에 자국이 남는다.
+    # bonds 에 누가 누구와 몇 번 만났는지가 있고, society 에 어디서
+    # 만났는지가 있다. 그 둘로 "이 자리와 저 자리 사이를 자주 오갔다"
+    # 를 센다.
+    try:
+        soc = (_one("molang_society", "data", id="eq.1").get("data") or {})
+        pair = {}
+        prev = {}
+        for m in (soc.get("meets") or []):
+            for who in (m.get("a"), m.get("b")):
+                spot = m.get("place")
+                if not who or not spot:
+                    continue
+                last = prev.get(who)
+                if last and last != spot:
+                    k = tuple(sorted([last, spot]))
+                    pair[k] = pair.get(k, 0) + 1
+                prev[who] = spot
+        view_spots = view.get("spots") or {}
+        view["paths"] = [
+            {"a": a, "b": b, "n": n}
+            for (a, b), n in sorted(pair.items(), key=lambda kv: -kv[1])[:40]
+            if a in view_spots and b in view_spots]
+    except Exception:
+        view["paths"] = []
+
     # 하루치 발자국
     frames = []
     try:
@@ -105,6 +131,25 @@ def world():
                     **{"at": f"gte.{since}", "order": "at.asc",
                        "limit": "3000"})
         frames = _frames(rows)
+
+        # 발자국이 더 촘촘하다 — 한 사람이 어디서 어디로 옮겼나
+        pair = {}
+        prev = {}
+        for r in rows:
+            who, spot = r.get("who"), r.get("spot")
+            if not who or not spot:
+                continue
+            last = prev.get(who)
+            if last and last != spot:
+                k = tuple(sorted([last, spot]))
+                pair[k] = pair.get(k, 0) + 1
+            prev[who] = spot
+        spots = view.get("spots") or {}
+        more = [{"a": a, "b": b, "n": n}
+                for (a, b), n in sorted(pair.items(), key=lambda kv: -kv[1])
+                if a in spots and b in spots][:40]
+        if more:
+            view["paths"] = more
     except Exception:
         pass
 
