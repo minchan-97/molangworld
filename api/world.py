@@ -93,48 +93,51 @@ def _frames(rows):
 # bonds 표의 모양을 여기서 단정하지 않는다. 한 줄에 한 쌍일 수도,
 # data 한 덩이에 전부 들어 있을 수도 있다. 둘 다 받는다.
 
-_B_WHO = ("who", "name", "other", "peer", "partner", "b", "with")
-_B_LV = ("level", "strength", "bond", "value", "score", "close")
-_B_N = ("times", "met", "meets", "n", "count", "seen")
+# molang_bonds 는 id=1 한 줄에 data 한 덩이다.
+#   data = { "몰랑이|피우피우": {met, last_at, warmth, talks[], topics{}} }
+# 열쇠는 두 이름을 **정렬해 이어붙인** 것이라, 쪼개서 상대를 찾는다.
+ME = "몰랑이"
 
 
 def _bonds():
-    rows = _get("molang_bonds", "*", limit="80")
-    out = []
-    for r in rows:
-        blob = r.get("data")
-        if isinstance(blob, dict):            # 한 덩이에 전부
-            for k, v in blob.items():
-                if isinstance(v, dict):
-                    out.append({"who": k, "level": _pick(v, _B_LV),
-                                "times": _pick(v, _B_N)})
-                elif isinstance(v, (int, float)):
-                    out.append({"who": k, "level": float(v), "times": None})
+    data = (_one("molang_bonds", "data", id="eq.1").get("data") or {})
+    mine, others = [], []
+    for k, v in data.items():
+        if not isinstance(v, dict):
             continue
-        who = _pick(r, _B_WHO)                 # 한 줄에 한 쌍
-        if who:
-            out.append({"who": str(who), "level": _pick(r, _B_LV),
-                        "times": _pick(r, _B_N)})
-    out.sort(key=lambda x: -float(x.get("level") or 0))
-    return out[:14]
+        names = str(k).split("|")
+        if len(names) != 2:
+            continue
+        row = {"level": round(float(v.get("warmth") or 0), 3),
+               "times": int(v.get("met") or 0),
+               "topics": [t for t, _ in sorted(
+                   (v.get("topics") or {}).items(),
+                   key=lambda kv: -kv[1])[:3]]}
+        if ME in names:
+            row["who"] = names[0] if names[1] == ME else names[1]
+            mine.append(row)
+        else:
+            # **몰랑이가 없어도 맺어진 사이.** 이게 사회가 도는 증거다.
+            row["who"] = " · ".join(names)
+            others.append(row)
+    mine.sort(key=lambda x: -x["level"])
+    others.sort(key=lambda x: -x["level"])
+    return {"mine": mine[:12], "others": others[:10]}
 
 
 # ── 사회 ────────────────────────────────────────────────────────
 
-def _text_of(x):
-    if isinstance(x, str):
-        return x
-    if isinstance(x, dict):
-        return (x.get("line") or x.get("text") or x.get("body")
-                or x.get("topic") or "")
-    return ""
-
-
 def _society():
     soc = (_one("molang_society", "data", id="eq.1").get("data") or {})
     meets = soc.get("meets") or []
-    rumors = (soc.get("rumors") or soc.get("talk")
-              or soc.get("hearsay") or soc.get("said") or [])
+
+    # **소문은 목록이 아니라 묶음이다.**
+    #   rumors = { "들은 이": ["누가 요즘 무슨 얘기를 하더라", …] }
+    # 누가 무엇을 들었는지가 핵심이라, 들은 이로 묶어 보여준다.
+    rumors = []
+    for who, lines in (soc.get("rumors") or {}).items():
+        if lines:
+            rumors.append({"who": who, "lines": list(lines)[-4:][::-1]})
 
     # 어디서 몇 번 마주쳤나
     where = {}
@@ -156,7 +159,7 @@ def _society():
         "n_meets": len(meets),
         "where": sorted(where.items(), key=lambda kv: -kv[1])[:8],
         "last": last,
-        "rumors": [t for t in (_text_of(r) for r in rumors[-10:]) if t][::-1],
+        "rumors": rumors[:6],
     }
 
 
@@ -178,6 +181,57 @@ def _evidence():
                     "sources": [str(s)[:90] for s in (src or [])][:5],
                     "at": r.get("created_at")})
     return out
+
+
+# ── 꿈 ──────────────────────────────────────────────────────────
+#
+# molang_dreams: text, feeling, lingering, energy, drive,
+#                pieces[], linger_why[]
+# 꿈은 **겪은 것을 섞어 만든다.** pieces 가 그 재료라, 같이 보여준다.
+
+def _dreams():
+    rows = _get("molang_dreams",
+                "text,feeling,lingering,energy,pieces,created_at",
+                order="id.desc", limit="10")
+    out = []
+    for r in rows:
+        if not r.get("text"):
+            continue
+        pieces = r.get("pieces")
+        if isinstance(pieces, str):
+            pieces = _safe(lambda: json.loads(pieces), [])
+        out.append({"text": r["text"], "feel": r.get("feeling"),
+                    "linger": r.get("lingering"),
+                    "energy": r.get("energy"),
+                    "pieces": [str(p)[:40] for p in (pieces or [])][:4],
+                    "at": r.get("created_at")})
+    return out
+
+
+# ── 대화 ────────────────────────────────────────────────────────
+#
+# 두 가지가 따로 쌓인다.
+#   molang_episodes    사람과 나눈 말 (owner 로 누구 기억인지 나뉜다)
+#   molang_peer_talks  피우피우와 나눈 말 (place 가 있으면 그때 거기)
+#
+# 여행 중이면 place 가 호텔·산길 같은 여행지로 찍힌다. 그래서
+# "여행 다니면서 나눈 말"이 따로 저장되는 게 아니라, **자리로 드러난다.**
+
+def _talks():
+    rows = _get("molang_episodes", "place,question,answer,emotion,created_at",
+                owner="eq.molang", order="id.desc", limit="12")
+    return [{"place": r.get("place"), "q": (r.get("question") or "")[:300],
+             "a": (r.get("answer") or "")[:400],
+             "emotion": r.get("emotion"), "at": r.get("created_at")}
+            for r in rows]
+
+
+def _peer():
+    rows = _get("molang_peer_talks", "topic,molang,piupiu,place,created_at",
+                order="id.desc", limit="14")
+    return [{"topic": r.get("topic"), "place": r.get("place"),
+             "molang": r.get("molang"), "piupiu": r.get("piupiu"),
+             "at": r.get("created_at")} for r in rows]
 
 
 def world():
@@ -275,9 +329,12 @@ def world():
     # ── 여기부터가 넓힌 쪽 ──
     # 여태까지 Streamlit 사이드바에서만 보이던 것들이다. 보는 것은
     # 이쪽으로 옮기고, 대화와 승인은 그대로 둔다.
-    view["bonds"] = _safe(_bonds, [])
+    view["bonds"] = _safe(_bonds, {})
     view["society"] = _safe(_society, {})
     view["evidence"] = _safe(_evidence, [])
+    view["dreams"] = _safe(_dreams, [])
+    view["talks"] = _safe(_talks, [])
+    view["peer"] = _safe(_peer, [])
 
     return {"view": view, "replay": {"frames": frames, "n": len(frames)}}
 
