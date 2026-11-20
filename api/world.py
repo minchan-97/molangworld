@@ -234,6 +234,100 @@ def _peer():
              "at": r.get("created_at")} for r in rows]
 
 
+# ── 기념품 ──────────────────────────────────────────────────────
+#
+# molang_travel.data.souvenirs = [{at, name, from}]
+# 같은 물건이 집 안에도 놓인다. 어느 방에 뒀는지까지 보여야
+# "가져와서 저기 뒀구나" 가 된다.
+
+def _keepsakes(home_objects):
+    tv = (_one("molang_travel", "data", id="eq.1").get("data") or {})
+    room_of = {}
+    for room, items in (home_objects or {}).items():
+        for it in (items or []):
+            nm = it.get("name") if isinstance(it, dict) else str(it)
+            if nm:
+                room_of[nm] = room
+    out = []
+    for s in (tv.get("souvenirs") or []):
+        if not isinstance(s, dict) or not s.get("name"):
+            continue
+        out.append({"name": s["name"], "from": s.get("from"),
+                    "at": s.get("at"), "room": room_of.get(s["name"])})
+    out.reverse()
+    return out[:12]
+
+
+# ── 자란 길 ─────────────────────────────────────────────────────
+#
+# 언제 무엇이 **처음** 생겼나. 네 군데에 따로 적히고 있다.
+#   molang_land.layout.log    지형이 생긴 날
+#   molang_village.data.born  모임에서 지은 곳
+#   molang_travel.data.trips  여행을 떠난 날
+#   molang_pinko.data         핀코를 알게 된 날
+# 한 줄로 모아야 자란 게 보인다.
+
+def _timeline():
+    ev = []
+
+    def add(at, kind, what, why=""):
+        if at and what:
+            ev.append({"at": float(at), "kind": kind,
+                       "what": str(what), "why": why})
+
+    ld = (_one("molang_land", "layout", id="eq.1").get("layout") or {})
+    for r in (ld.get("log") or []):
+        add(r.get("at"), "땅", r.get("kind"),
+            ", ".join(r.get("from") or []) + " 에서" if r.get("from") else "")
+
+    vg = (_one("molang_village", "data", id="eq.1").get("data") or {})
+    for r in (vg.get("born") or []):
+        add(r.get("at"), "마을", r.get("name"), "모임에서 지었어요")
+
+    tv = (_one("molang_travel", "data", id="eq.1").get("data") or {})
+    for r in (tv.get("trips") or []):
+        s = r.get("souvenir")
+        add(r.get("at"), "여행", r.get("where"),
+            f"{s} 를 가져왔어요" if s else "")
+
+    pk = (_one("molang_pinko", "data", id="eq.1").get("data") or {})
+    for place, v in pk.items():
+        if isinstance(v, dict) and v.get("known"):
+            add(v.get("known_at"), "이웃", v.get("name"),
+                f"{place}에서 알게 됐어요")
+
+    ev.sort(key=lambda e: -e["at"])
+    return ev[:24]
+
+
+# ── 목적 ────────────────────────────────────────────────────────
+#
+# molang_purposes 에 판본이 다 남아 있다. status='core' 가 핵심 목적,
+# 'active' 가 지금 품은 하위 목적. 사람이 승인한 것만 들어온다.
+
+def _purposes():
+    rows = _get("molang_purposes", "purpose,why,status,created_at",
+                order="id.asc", limit="80")
+    core = [{"text": r.get("purpose"), "why": r.get("why"),
+             "at": r.get("created_at")}
+            for r in rows if r.get("status") == "core" and r.get("purpose")]
+    now = [{"text": r.get("purpose"), "at": r.get("created_at")}
+           for r in rows if r.get("status") == "active" and r.get("purpose")]
+    return {"core": core[-8:], "now": now[-8:][::-1]}
+
+
+# ── 오늘 마음 ───────────────────────────────────────────────────
+#
+# organism_state.moods 에 마지막 120개가 쌓인다. 맨 끝이 지금 기분.
+
+def _mood():
+    rows = (_one("organism_state", "moods", id="eq.1").get("moods") or [])
+    if not rows:
+        return {}
+    m = rows[-1] if isinstance(rows[-1], dict) else {}
+    return {"name": m.get("name"), "note": m.get("note")}
+
+
 def world():
     import time
 
@@ -335,6 +429,11 @@ def world():
     view["dreams"] = _safe(_dreams, [])
     view["talks"] = _safe(_talks, [])
     view["peer"] = _safe(_peer, [])
+    view["keepsakes"] = _safe(
+        lambda: _keepsakes((view.get("home") or {}).get("objects")), [])
+    view["timeline"] = _safe(_timeline, [])
+    view["purposes"] = _safe(_purposes, {})
+    view["mood"] = _safe(_mood, {})
 
     return {"view": view, "replay": {"frames": frames, "n": len(frames)}}
 
