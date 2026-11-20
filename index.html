@@ -64,6 +64,27 @@
   }
   h1{font-size:1.3rem;margin:0;letter-spacing:.01em;line-height:1.2}
   .sub{font-size:.8rem;color:var(--dim);margin-top:2px}
+  /* 오늘 마음 — 날씨처럼 머리에 한 줄. 숫자는 쓰지 않는다. */
+  .mood{
+    display:inline-block;margin-top:6px;background:var(--butter);
+    border:1.5px solid var(--soft);border-radius:999px;
+    padding:3px 11px;font-size:.78rem;
+  }
+
+  /* 자란 길 — 가운데 줄 하나에 자국을 찍는다 */
+  .tl{position:relative;padding-left:20px}
+  .tl::before{content:"";position:absolute;left:5px;top:4px;bottom:4px;
+              width:3px;border-radius:3px;background:var(--grass)}
+  .tl .ev{position:relative;margin:0 0 14px}
+  .tl .ev::before{content:"";position:absolute;left:-19px;top:7px;
+    width:9px;height:9px;border-radius:50%;
+    background:var(--card);border:2.5px solid var(--line)}
+  .tl .ev .w{margin:0}
+  .tl .ev .d{font-size:.76rem;color:var(--dim)}
+
+  /* 목적이 자라온 길 — 아래로 흐른다 */
+  .step{margin:0 0 4px}
+  .arrow{color:var(--dim);margin:2px 0 6px 2px;font-size:.78rem}
 
   /* 지도에 **굵은 선**을 몰아준다. 대담함은 한 군데만. */
   .map{
@@ -203,6 +224,7 @@
   <div>
     <h1>몰랑이네 동네</h1>
     <div class="sub" id="sub">문 여는 중이에요…</div>
+    <div class="mood hide" id="mood"></div>
   </div>
 </header>
 
@@ -212,6 +234,7 @@
   <button data-go="society">🏘️ 사회</button>
   <button data-go="talks">💬 대화</button>
   <button data-go="dreams">💭 꿈</button>
+  <button data-go="grown">🌱 자란 길</button>
   <button data-go="evidence">📎 근거</button>
 </nav>
 
@@ -235,8 +258,12 @@
     <div id="pbody"></div>
   </div>
 
+  <div id="shelf"></div>
+
   <footer>15분마다 한 걸음씩 움직입니다</footer>
 </section>
+
+<section id="tab-grown" class="hide"></section>
 
 <section id="tab-bonds" class="hide"></section>
 <section id="tab-society" class="hide"></section>
@@ -494,7 +521,7 @@ const esc = s => String(s == null ? "" : s)
 function go(name){
   for(const b of document.querySelectorAll("#tabs button"))
     b.classList.toggle("on", b.dataset.go === name);
-  for(const id of ["town","bonds","society","talks","dreams","evidence"])
+  for(const id of ["town","bonds","society","talks","dreams","grown","evidence"])
     document.getElementById("tab-"+id).classList.toggle("hide", id !== name);
   // 지형은 칸 너비를 재서 그린다. 숨어 있을 땐 0 이라 안 그려진다.
   if(name === "town" && world) requestAnimationFrame(paintTerrain);
@@ -507,11 +534,87 @@ for(const b of document.querySelectorAll("#tabs button"))
   b.onclick = () => go(b.dataset.go);
 
 function renderAll(){
+  renderMood();
+  renderShelf();
+  renderGrown();
   renderBonds();
   renderSociety();
   renderTalks();
   renderDreams();
   renderEvidence();
+}
+
+// ── 오늘 마음 ────────────────────────────────────────────────────
+const MOOD_FACE = {"들뜸":"✨","벅참":"🌊","뿌듯함":"🌼","심심함":"🫧"};
+
+function renderMood(){
+  const el = document.getElementById("mood");
+  const m = (world && world.mood) || {};
+  if(!m.name){ el.classList.add("hide"); return; }
+  el.classList.remove("hide");
+  el.textContent = `${MOOD_FACE[m.name]||"🌤️"} 오늘은 ${m.name}`
+    + (m.note ? ` — ${m.note}` : "");
+}
+
+// ── 기념품 선반 ──────────────────────────────────────────────────
+//
+// 여행에서 들고 온 물건은 집 어느 방엔가 놓인다. 그 방까지 보여야
+// "가져와서 저기 뒀구나" 가 된다.
+
+function renderShelf(){
+  const el = document.getElementById("shelf");
+  const rows = (world && world.keepsakes) || [];
+  if(!rows.length){ el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="card" style="margin-top:14px">
+    <h3>🧺 가져온 것</h3>
+    ${rows.map(k => `<div class="muted" style="margin:9px 0">
+      <b style="color:var(--ink)">${esc(k.name)}</b><br>
+      ${k.from ? `<span class="tag">${esc(k.from)}</span>` : ""}
+      ${k.room ? `${esc(k.room)}에 뒀어요` : ""}
+      ${k.at ? ` · ${when(k.at*1000)}` : ""}</div>`).join("")}
+  </div>`;
+}
+
+// ── 자란 길 ──────────────────────────────────────────────────────
+const TL_FACE = {"땅":"⛰️","마을":"🏘️","여행":"✈️","이웃":"🧑‍🌾"};
+
+function renderGrown(){
+  const el = document.getElementById("tab-grown");
+  const ev = (world && world.timeline) || [];
+  const p = (world && world.purposes) || {};
+  const core = p.core || [], now = p.now || [];
+  let out = "";
+
+  if(ev.length){
+    out += `<div class="head"><h3>🌱 언제 무엇이 생겼나</h3>
+      <p>동네에 처음 생긴 것만 모았어요.</p></div>
+      <div class="card"><div class="tl">${ev.map(e => `
+        <div class="ev">
+          <p class="w">${TL_FACE[e.kind]||"🌱"}
+            <b>${esc(e.what)}</b>
+            <span class="tag" style="margin-left:4px">${esc(e.kind)}</span></p>
+          <div class="d">${when(e.at*1000)}${
+            e.why ? ` · ${esc(e.why)}` : ""}</div>
+        </div>`).join("")}</div></div>`;
+  }
+
+  if(core.length){
+    out += `<div class="head" style="margin-top:18px">
+      <h3>🧭 목적이 자라온 길</h3>
+      <p>몰랑이가 제안하고 사람이 승인한 것만 남아요.</p></div>
+      <div class="card">${core.map((c,i) => `
+        ${i ? `<div class="arrow">↓ ${esc(c.why || "")}</div>` : ""}
+        <p class="step">${esc(c.text)}</p>
+        <div class="d muted" style="font-size:.74rem;margin:0">${
+          when(c.at)}</div>`).join("")}</div>`;
+  }
+
+  if(now.length)
+    out += `<div class="card"><h3>지금 품은 것</h3>
+      ${now.map(n => `<div class="src">${esc(n.text)}</div>`).join("")}</div>`;
+
+  el.innerHTML = out || `<div class="card"><h3>🌱 자란 길</h3>
+    <div class="muted">아직 남은 자국이 없어요.</div></div>`;
 }
 
 const when = s => s ? new Date(s).toLocaleString("ko-KR",
