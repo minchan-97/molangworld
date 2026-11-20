@@ -78,6 +78,11 @@
                pointer-events:none;border-radius:10px}
   .grid{position:relative;z-index:1}
   .cell{
+    /* 칸 안의 그림글자가 칸보다 크면 칸이 밀려 커진다 — 그래서 지도가
+       가로로 103px 넘쳐 오른쪽이 잘려 보였다. 0 까지 줄게 둔다.
+       (잘라내지는 않는다 — 누가 있는지 알리는 표가 칸 밖으로 조금
+        나오는데, 그건 보여야 한다) */
+    min-width:0;
     aspect-ratio:1;border-radius:4px;
     display:flex;align-items:center;justify-content:center;
     font-size:min(3.4vw,15px);position:relative;
@@ -171,6 +176,11 @@
     margin-bottom:12px;box-shadow:var(--pop);
   }
   .card h3{font-size:1rem;margin:0 0 10px}
+  /* 묶음 제목은 카드로 싸지 않는다. 빈 카드가 자리만 먹는다. */
+  .head{width:100%;margin:6px 4px 9px}
+  .head h3{font-family:"Jua",inherit;font-size:1.05rem;margin:0 0 3px}
+  .head p{margin:0;font-size:.82rem;color:var(--dim)}
+  .head + .card{margin-top:0}
   .line{display:flex;align-items:center;gap:9px;margin:8px 0}
   .line .nm{min-width:84px}
   .meter{flex:1;height:9px;border-radius:99px;background:var(--paper);
@@ -279,13 +289,15 @@ function whoAt(frame){
 }
 
 // 자리마다 땅의 결이 있다. 둘레로 번져서 지형이 된다.
+// 땅빛도 그림에서 가져왔다. 진한 색을 쓰면 지도가 차가워져서,
+// 소풍 그림의 하늘·풀·돗자리 쪽으로 연하게 잡는다.
 const SOIL = {
-  "바다":[74,134,170], "물가":[88,142,166], "숲":[82,128,76],
-  "들판":[168,178,96], "산":[138,128,114], "언덕마루":[160,158,102],
-  "꽃길":[192,128,152], "밤하늘터":[94,96,150], "메아리벽":[130,126,116],
-  "폐허":[138,126,112], "안개골":[152,152,152], "꽃밭":[196,136,160],
+  "바다":[122,172,188], "물가":[146,186,196], "숲":[138,182,112],
+  "들판":[196,212,132], "산":[182,168,146], "언덕마루":[204,200,136],
+  "꽃길":[236,180,196], "밤하늘터":[150,152,196], "메아리벽":[186,176,158],
+  "폐허":[180,168,150], "안개골":[204,204,198], "꽃밭":[240,186,200],
 };
-const VILLAGE_SOIL = [188,162,124];     // 마을은 흙빛
+const VILLAGE_SOIL = [240,216,152];     // 마을은 돗자리 빛
 
 function soilOf(name, zone){
   return SOIL[name] || (zone === "village" ? VILLAGE_SOIL : [150,160,130]);
@@ -487,7 +499,7 @@ function go(name){
   // 지형은 칸 너비를 재서 그린다. 숨어 있을 땐 0 이라 안 그려진다.
   if(name === "town" && world) requestAnimationFrame(paintTerrain);
   // 긴 목록을 보다가 탭을 바꾸면 중간에 떨어진다 — 늘 머리부터.
-  scrollTo({top:0, behavior:"instant"});
+  scrollTo(0, 0);
 }
 document.getElementById("shut").onclick = () =>
   document.getElementById("panel").classList.add("hide");
@@ -555,9 +567,9 @@ function renderTalks(){
   let out = "";
 
   if(peer.length){
-    out += `<div class="card"><h3>🐤 피우피우와 나눈 말</h3>
-      <div class="muted">몰랑이가 먼저 말하고, 피우피우가 받아요.
-        자리가 적혀 있으면 그때 거기 있었던 거예요.</div></div>`;
+    out += `<div class="head"><h3>🐤 피우피우와 나눈 말</h3>
+      <p>몰랑이가 먼저 말하고, 피우피우가 받아요.
+         자리가 적혀 있으면 그때 거기 있었던 거예요.</p></div>`;
     out += peer.map(t => `<div class="card">
       <div class="muted">
         ${t.place ? `<span class="tag">📍 ${esc(t.place)}</span>` : ""}
@@ -569,7 +581,7 @@ function renderTalks(){
   }
 
   if(mine.length){
-    out += `<div class="card" style="margin-top:14px">
+    out += `<div class="head" style="margin-top:16px">
       <h3>💬 나와 나눈 말</h3></div>`;
     out += mine.map(t => `<div class="card">
       <div class="muted">
@@ -599,9 +611,9 @@ function renderDreams(){
       밤에 쌓인 게 많아야 꿔요 — 적으면 그냥 자요.</div></div>`;
     return;
   }
-  el.innerHTML = `<div class="card"><h3>💭 꾼 꿈</h3>
-    <div class="muted">겪은 것을 섞어서 꿔요. 아래 낱말이 그 재료예요.
-      </div></div>` + rows.map(d => `<div class="card">
+  el.innerHTML = `<div class="head"><h3>💭 꾼 꿈</h3>
+    <p>겪은 것을 섞어서 꿔요. 아래 낱말이 그 재료예요.</p></div>`
+    + rows.map(d => `<div class="card">
     <div class="muted">
       ${d.feel ? `<span class="tag">${esc(d.feel)}</span>` : ""}
       ${when(d.at)}</div>
@@ -674,11 +686,10 @@ function renderEvidence(){
     return;
   }
   const with_src = rows.filter(r => r.n > 0).length;
-  el.innerHTML = `<div class="card">
+  el.innerHTML = `<div class="head">
     <h3>📎 무엇을 꺼내 보고 말했나</h3>
-    <div class="muted">최근 ${rows.length}번 중 근거를 꺼낸 것
-      <b style="color:var(--ink)">${with_src}번</b>.
-      점수는 매기지 않아요 — 있는 그대로 봅니다.</div>
+    <p>최근 ${rows.length}번 중 근거를 꺼낸 것 ${with_src}번.
+       점수는 매기지 않아요 — 있는 그대로 봅니다.</p>
   </div>` + rows.map(r => `<div class="card">
     <div class="muted"><span class="tag">${esc(r.type || "?")}</span>
       ${r.at ? new Date(r.at).toLocaleString("ko-KR",
