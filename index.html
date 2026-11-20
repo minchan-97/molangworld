@@ -108,6 +108,41 @@
   .panel .row b{color:var(--ink);font-weight:550}
   .hide{display:none}
   footer{margin-top:16px;font-size:.68rem;color:var(--dim);text-align:center}
+
+  /* 탭 — **보는 것만** 여기 모은다. 대화와 승인은 그대로 Streamlit 에. */
+  nav{
+    width:100%;max-width:560px;display:flex;gap:4px;margin-bottom:10px;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;
+  }
+  nav button{
+    flex:0 0 auto;border-radius:999px;padding:6px 14px;
+    font-size:.78rem;color:var(--dim);border-color:transparent;
+    background:transparent;
+  }
+  nav button.on{
+    color:var(--ink);background:var(--card);border-color:var(--line);
+    font-weight:600;
+  }
+  section{width:100%;max-width:560px;display:flex;flex-direction:column;
+          align-items:center}
+  .card{
+    width:100%;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:12px 14px;font-size:.8rem;margin-bottom:10px;
+  }
+  .card h3{font-size:.82rem;margin:0 0 8px;font-weight:600}
+  .line{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .line .nm{min-width:76px;font-weight:550}
+  .meter{flex:1;height:6px;border-radius:99px;background:var(--dirt);
+         overflow:hidden}
+  .meter i{display:block;height:100%;background:#c89b5e;border-radius:99px}
+  .num{font-size:.7rem;color:var(--dim);
+       font-variant-numeric:tabular-nums;min-width:54px;text-align:right}
+  .quote{margin:7px 0;line-height:1.5}
+  .muted{color:var(--dim);line-height:1.5;margin:5px 0}
+  .tag{display:inline-block;background:var(--dirt);border-radius:7px;
+       padding:1px 7px;font-size:.68rem;color:var(--dim);margin-right:4px}
+  .src{color:var(--dim);font-size:.74rem;margin:3px 0 3px 2px;
+       line-height:1.45;border-left:2px solid var(--line);padding-left:8px}
 </style>
 </head>
 <body>
@@ -116,31 +151,47 @@
   <div class="sub" id="sub">불러오는 중…</div>
 </header>
 
-<div class="map"><div class="wrap">
-  <canvas id="terrain"></canvas>
-  <div class="grid" id="grid"></div>
-</div></div>
+<nav id="tabs">
+  <button data-go="town" class="on">🗺️ 동네</button>
+  <button data-go="bonds">🫂 사이</button>
+  <button data-go="society">🏘️ 사회</button>
+  <button data-go="evidence">📎 근거</button>
+</nav>
 
-<div class="legend" id="legend"></div>
+<section id="tab-town">
+  <div class="map"><div class="wrap">
+    <canvas id="terrain"></canvas>
+    <div class="grid" id="grid"></div>
+  </div></div>
 
-<div class="bar">
-  <button id="play">▶ 하루 되감기</button>
-  <input type="range" id="seek" min="0" max="0" value="0">
-  <span class="time" id="time">지금</span>
-</div>
+  <div class="legend" id="legend"></div>
 
-<div class="panel hide" id="panel">
-  <h2 id="pname"></h2>
-  <div id="pbody"></div>
-</div>
+  <div class="bar">
+    <button id="play">▶ 하루 되감기</button>
+    <input type="range" id="seek" min="0" max="0" value="0">
+    <span class="time" id="time">지금</span>
+  </div>
 
-<footer>15분마다 한 걸음씩 움직입니다</footer>
+  <div class="panel hide" id="panel">
+    <h2 id="pname"></h2>
+    <div id="pbody"></div>
+  </div>
+
+  <footer>15분마다 한 걸음씩 움직입니다</footer>
+</section>
+
+<section id="tab-bonds" class="hide"></section>
+<section id="tab-society" class="hide"></section>
+<section id="tab-evidence" class="hide"></section>
 
 <script>
 const API = "/api/world";          // 같은 Vercel 배포의 함수
 let world = null, frames = [], idx = -1, timer = null;
 
-const EMO = {"몰랑이":"🐰","피우피우":"🐤","슈야":"🧁","토야":"🍫","미피":"🍼"};
+const EMO_ = {"몰랑이":"🐰","피우피우":"🐤","슈야":"🧁","토야":"🍫","미피":"🍼"};
+// 핀코는 여럿이다 — 어부 핀코, 나무꾼 핀코, 별지기 핀코…
+const EMO = new Proxy(EMO_, {get:(o,k)=>
+  o[k] || (typeof k === "string" && k.includes("핀코") ? "🧑‍🌾" : undefined)});
 
 async function load(){
   try{
@@ -148,6 +199,7 @@ async function load(){
     const d = await r.json();
     if(d.error) throw new Error(d.error);
     world = d.view; frames = (d.replay && d.replay.frames) || [];
+    renderAll();
     const seek = document.getElementById("seek");
     seek.max = Math.max(0, frames.length - 1);
     seek.value = seek.max;
@@ -362,6 +414,130 @@ function houseHTML(){
   }
   out += `</div>`;
   return out;
+}
+
+// ── 탭 ───────────────────────────────────────────────────────────
+//
+// **보는 것만 옮긴다.** 대화와 승인은 Streamlit 에 그대로 둔다.
+// 여기서 몰랑이를 부르려면 유형 고르기·트리 걷기·기억 꺼내기·가드가
+// 다 있어야 하는데 그건 엔진 쪽에만 있다. 따로 부르면 기억은 같은
+// 곳에 남아도 **그 기억을 만든 길이 둘로 갈린다.**
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+function go(name){
+  for(const b of document.querySelectorAll("#tabs button"))
+    b.classList.toggle("on", b.dataset.go === name);
+  for(const id of ["town","bonds","society","evidence"])
+    document.getElementById("tab-"+id).classList.toggle("hide", id !== name);
+  // 지형은 칸 너비를 재서 그린다. 숨어 있을 땐 0 이라 안 그려진다.
+  if(name === "town" && world) requestAnimationFrame(paintTerrain);
+}
+for(const b of document.querySelectorAll("#tabs button"))
+  b.onclick = () => go(b.dataset.go);
+
+function renderAll(){
+  renderBonds();
+  renderSociety();
+  renderEvidence();
+}
+
+function renderBonds(){
+  const el = document.getElementById("tab-bonds");
+  const rows = (world && world.bonds) || [];
+  if(!rows.length){
+    el.innerHTML = `<div class="card"><h3>🫂 사이</h3>
+      <div class="muted">아직 쌓인 사이가 없어요.<br>
+      밤 워커가 돌고 나면 여기에 보여요.</div></div>`;
+    return;
+  }
+  const most = Math.max(...rows.map(r => +r.level || 0), 1);
+  el.innerHTML = `<div class="card">
+    <h3>🫂 누구와 가까운가</h3>
+    ${rows.map(r => {
+      const lv = +r.level || 0;
+      const n = r.times == null ? "" : `${r.times}번`;
+      return `<div class="line">
+        <span class="nm">${EMO[r.who]||"🐾"} ${esc(r.who)}</span>
+        <span class="meter"><i style="width:${
+          Math.round(Math.min(1, lv/most)*100)}%"></i></span>
+        <span class="num">${lv.toFixed(2)} ${n}</span>
+      </div>`;
+    }).join("")}
+    <div class="muted" style="margin-top:10px">
+      함께 있던 횟수가 쌓이면 짙어지고, 한참 안 보면 옅어져요.</div>
+  </div>`;
+}
+
+function renderSociety(){
+  const el = document.getElementById("tab-society");
+  const s = (world && world.society) || {};
+  const parts = [];
+
+  parts.push(`<div class="card">
+    <h3>🏘️ 이웃들끼리</h3>
+    <div class="muted">몰랑이가 없어도 이웃들은 서로 마주치고,
+      관심을 옮기고, 그 말이 동네에 남아요.</div>
+    <div class="line" style="margin-top:10px">
+      <span class="nm">마주침</span>
+      <span class="num" style="min-width:auto">${s.n_meets || 0}번</span>
+    </div>
+  </div>`);
+
+  if((s.where || []).length)
+    parts.push(`<div class="card"><h3>어디서 자주 마주쳤나</h3>
+      ${s.where.map(([p,n]) =>
+        `<div class="line"><span class="nm">${esc(p)}</span>
+         <span class="num" style="min-width:auto">${n}번</span></div>`).join("")}
+    </div>`);
+
+  if((s.last || []).length)
+    parts.push(`<div class="card"><h3>최근 마주침</h3>
+      ${s.last.map(m => `<div class="muted">
+        <b style="color:var(--ink)">${esc(m.a)}</b> ·
+        <b style="color:var(--ink)">${esc(m.b)}</b>
+        ${m.place ? `<span class="tag">${esc(m.place)}</span>` : ""}
+        ${m.topic ? esc(m.topic) : ""}</div>`).join("")}
+    </div>`);
+
+  if((s.rumors || []).length)
+    parts.push(`<div class="card"><h3>떠도는 말</h3>
+      ${s.rumors.map(t => `<div class="quote">${esc(t)}</div>`).join("")}
+      <div class="muted" style="margin-top:8px">
+        들은 말은 사실로 바로 쌓이지 않아요. 0.35 로 시작해요.</div>
+    </div>`);
+
+  if(parts.length === 1)
+    parts.push(`<div class="card"><div class="muted">
+      아직 마주친 기록이 없어요.</div></div>`);
+
+  el.innerHTML = parts.join("");
+}
+
+function renderEvidence(){
+  const el = document.getElementById("tab-evidence");
+  const rows = (world && world.evidence) || [];
+  if(!rows.length){
+    el.innerHTML = `<div class="card"><h3>📎 근거</h3>
+      <div class="muted">아직 기록이 없어요.<br>
+      대화를 하면 그때 무엇을 꺼내 봤는지 여기 쌓여요.</div></div>`;
+    return;
+  }
+  const with_src = rows.filter(r => r.n > 0).length;
+  el.innerHTML = `<div class="card">
+    <h3>📎 무엇을 꺼내 보고 말했나</h3>
+    <div class="muted">최근 ${rows.length}번 중 근거를 꺼낸 것
+      <b style="color:var(--ink)">${with_src}번</b>.
+      점수는 매기지 않아요 — 있는 그대로 봅니다.</div>
+  </div>` + rows.map(r => `<div class="card">
+    <div class="muted"><span class="tag">${esc(r.type || "?")}</span>
+      ${r.at ? new Date(r.at).toLocaleString("ko-KR",
+        {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
+    </div>
+    ${r.n ? r.sources.map(x => `<div class="src">${esc(x)}</div>`).join("")
+          : `<div class="muted">꺼낼 근거가 없었어요</div>`}
+  </div>`).join("");
 }
 
 document.getElementById("seek").oninput = e => {
