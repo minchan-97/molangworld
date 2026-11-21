@@ -19,6 +19,7 @@
 화면 전체가 안 뜨는 일이 없도록, 모든 덧읽기는 따로 감싼다.
 """
 import json
+import math
 import os
 import urllib.parse
 import urllib.request
@@ -32,6 +33,20 @@ KEY = (os.environ.get("SUPABASE_ANON_KEY")
 # 여기 적어두면 몰랑이 코드를 안 가져와도 집을 그릴 수 있다.
 ROOMS = {"부엌": [4, 4], "서재": [4, 1], "창가": [2, 0],
          "작업방": [0, 4], "마당": [0, 1], "다락": [2, 3]}
+
+# atlas.py 와 같은 값 — 마을은 가운데 칸, 바깥은 바깥 고리.
+VILLAGE_BOX = (7, 5, 7, 5)
+
+_ICON = {
+    "몰랑이네": "🏠", "슈야토야네": "🧁", "미피네": "🍼",
+    "빵집": "🥐", "우물가": "⛲", "꽃밭": "🌷", "언덕": "🌾",
+    "가게": "🏪", "놀이터": "🛝", "도서관": "📚", "음악방": "🎵",
+    "사진관": "📷", "별보는터": "🔭", "목욕탕": "♨️",
+    "작업실": "🔧", "카페": "☕", "텃밭": "🥕",
+    "바다": "🌊", "숲": "🌲", "산": "⛰️", "들판": "🌾", "물가": "🏞️",
+    "언덕마루": "🌄", "밤하늘터": "✨", "꽃길": "🌸", "폐허": "🏚️",
+    "안개골": "🌫️", "메아리벽": "🔊", "마을": "🏘️",
+}
 
 
 def _get(table, select="*", **q):
@@ -328,12 +343,76 @@ def _mood():
     return {"name": m.get("name"), "note": m.get("note")}
 
 
+# ── 아직 지도에 안 붙은 자리 ──────────────────────────────────
+# atlas.rebuild 는 **밤 워커에서만** 돈다. 그래서 낮에 생긴 자리는
+# 다음 날 새벽까지 지도에 없다. 생겼다는 소식은 streamlit 에 뜨는데
+# 지도에는 없으니 사라진 것처럼 보인다.
+#
+# 그래서 여기서 molang_village · molang_land 를 직접 보고, 지도에
+# 없는 이름을 atlas.py 와 **같은 식**으로 임시로 놓는다. 자리를
+# 저장하지는 않는다 — 자리를 정하는 건 끝까지 atlas 의 일이다.
+# 밤이 지나면 atlas 가 같은 식으로 계산해 같은 칸에 박아 넣는다
+# (이미 찬 칸이면 옆으로 밀리므로 한 칸 정도는 달라질 수 있다).
+
+def _unplaced(view):
+    W, H = (view.get("size") or [21, 15])[:2]
+    bx, by, bw, bh = VILLAGE_BOX
+    spots = view.setdefault("spots", {})
+    taken = {tuple(v.get("xy") or (-1, -1)) for v in spots.values()}
+
+    def put(name, xy, zone, extra=None):
+        x, y = xy
+        for r in range(0, max(W, H)):            # 찬 칸이면 옆으로
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if max(abs(dx), abs(dy)) != r:
+                        continue
+                    px, py = x + dx, y + dy
+                    if not (0 <= px < W and 0 <= py < H):
+                        continue
+                    if (px, py) in taken:
+                        continue
+                    taken.add((px, py))
+                    spots[name] = {"xy": [px, py], "zone": zone,
+                                   "icon": _ICON.get(
+                                       name, "🏡" if zone == "village"
+                                       else "📍"),
+                                   "fresh": True, **(extra or {})}
+                    return
+        return
+
+    # 마을 — 가운데 칸, SOM 좌표의 차례만 가져온다
+    vg = (_one("molang_village", "data", id="eq.1").get("data") or {})
+    for name, p in sorted((vg.get("places") or {}).items(),
+                          key=lambda kv: tuple(
+                              (kv[1] or {}).get("at") or (0, 0))):
+        if name in spots or not isinstance(p, dict):
+            continue
+        at = p.get("at") or (0, 0)
+        put(name, (bx + int(at[1]) % bw, by + int(at[0]) % bh), "village")
+
+    # 바깥 — 거리만큼 바깥 고리로, 방향은 이름의 해시
+    cx, cy = bx + bw / 2, by + bh / 2
+    ld = (_one("molang_land", "layout", id="eq.1").get("layout") or {})
+    for p in (ld.get("places") or []):
+        name = (p or {}).get("kind")
+        if not name or name in spots:
+            continue
+        dist = float(p.get("dist") or 3.0)
+        ring = min(max(bw, bh) / 2 + 1.5 + dist * 0.55, min(W, H) / 2 - 1)
+        ang = (sum(ord(c) for c in name) % 360) * math.pi / 180
+        put(name, (int(cx + ring * math.cos(ang)),
+                   int(cy + ring * math.sin(ang) * 0.75)),
+            "land", {"dist": dist})
+
+
 def world():
     import time
 
     atlas = (_one("molang_atlas", "data", id="eq.1").get("data") or {})
     view = {"size": atlas.get("size") or [21, 15],
             "spots": atlas.get("spots") or {}, "who": {}}
+    _safe(lambda: _unplaced(view), None)
 
     # 지금 누가 어디 있나
     try:
