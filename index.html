@@ -117,6 +117,12 @@
   .cell.spot:active{transform:translateY(1px) scale(.95)}
   .cell.here{background:var(--butter);
              box-shadow:0 0 0 2.5px var(--line), 0 2px 0 rgba(122,92,72,.3)}
+  /* 아직 지도가 자리를 못 박은 곳 — 테를 점선으로 둬서 '임시' 임을
+     숨기지 않는다. 밤이 지나면 저절로 실선이 된다. */
+  .cell.spot.fresh{
+    background:var(--grass);
+    box-shadow:none;outline:1.5px dashed var(--line);outline-offset:-1.5px;
+  }
   .who{
     position:absolute;bottom:-2px;right:-1px;
     font-size:min(2.6vw,11px);line-height:1;
@@ -424,7 +430,8 @@ function draw(frame){
     if(!hit){ c.className = "cell empty"; g.appendChild(c); continue; }
     const [name,s] = hit;
     const people = here[name] || [];
-    c.className = `cell spot ${s.zone}` + (people.length ? " here" : "");
+    c.className = `cell spot ${s.zone}` + (people.length ? " here" : "")
+                  + (s.fresh ? " fresh" : "");
     c.textContent = s.icon;
     c.title = name;
     if(people.length){
@@ -465,6 +472,9 @@ function show(name, s, people){
   }
   if(s.zone === "land" && s.dist)
     rows.push(`<div class="row">집에서 <b>${s.dist}</b>만큼 멀어요</div>`);
+  if(s.fresh)
+    rows.push(`<div class="row">🌱 <b>막 생긴 곳</b>이에요. 오늘 밤에
+      지도에 자리를 잡아요</div>`);
   if(world.pinko){
     const pk = Object.entries(world.pinko).find(([k]) => k === name);
     if(pk) rows.push(`<div class="row">🧑‍🌾 <b>${pk[1]}</b>가 여기 살아요</div>`);
